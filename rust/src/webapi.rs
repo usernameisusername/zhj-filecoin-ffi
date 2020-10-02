@@ -1,27 +1,48 @@
+use crate::proofs::types::*;
+use crate::util::api::init_log;
+use ffi_toolkit::{catch_panic_response, raw_ptr, rust_str_to_c_str, FCPResponseStatus};
+use filecoin_proofs_api::seal::SealCommitPhase2Output;
+use filecoin_proofs_api::SectorId;
 use filecoin_webapi::polling::PollingState;
+use filecoin_webapi::*;
 use log::*;
+use once_cell::sync::Lazy;
 use rand::seq::SliceRandom;
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, ClientBuilder};
+use reqwest::Certificate;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_value, json, Value};
 use std::fs::{self};
-use std::thread;
+use std::io::Read;
+use std::slice::from_raw_parts;
 use std::time::Duration;
+use std::{env, mem, thread};
 
-lazy_static! {
-    static ref REQWEST_CLIENT: Client = Client::new();
-    static ref CONFIG: WebApiConfig = {
-        let f = fs::File::open("/etc/filecoin-webapi.yaml").unwrap();
-        let config = serde_yaml::from_reader(f).unwrap();
+static REQWEST_CLIENT: Lazy<Client> = Lazy::new(|| {
+    let mut buf = vec![];
+    fs::File::open(&CONFIG.trust_cert)
+        .expect("open cert file failed!")
+        .read_to_end(&mut buf)
+        .expect("read cert file failed");
+    let cert = Certificate::from_pem(&buf).expect("read PEM cert failed");
 
-        info!("filecoin-webapi config: {:?}", config);
-        config
-    };
-}
+    ClientBuilder::new()
+        .add_root_certificate(cert)
+        .build()
+        .expect("Build Reqwest client failed!")
+});
+
+static CONFIG: Lazy<WebApiConfig> = Lazy::new(|| {
+    let f = fs::File::open("/etc/filecoin-webapi.yaml").expect("open config file failed");
+    let config = serde_yaml::from_reader(f).unwrap();
+
+    info!("filecoin-webapi config: {:?}", config);
+    config
+});
 
 #[derive(Deserialize, Serialize, Debug)]
 struct WebApiConfig {
-    url: String,
+    trust_cert: String,
     servers: Vec<String>,
 }
 
@@ -176,6 +197,81 @@ pub(crate) fn webapi_post_polling<T: Serialize + ?Sized>(
 #[allow(unused_macros)]
 macro_rules! webapi_post_polling {
     ($path:literal, $json:expr) => {
-        crate::util::rpc::webapi_post_polling($path, $json);
+        crate::webapi::webapi_post_polling($path, $json);
     };
+}
+
+/*=== Interface reimplements ===*/
+#[no_mangle]
+pub(crate) unsafe fn fil_seal_commit_phase2_webapi(
+    seal_commit_phase1_output_ptr: *const u8,
+    seal_commit_phase1_output_len: libc::size_t,
+    sector_id: u64,
+    prover_id: fil_32ByteArray,
+) -> *mut fil_SealCommitPhase2Response {
+    catch_panic_response(|| {
+        init_log();
+
+        info!("seal_commit_phase2: start");
+
+        // let _guard = wait_cond!("C2".to_string(), 30);
+
+        let mut response = fil_SealCommitPhase2Response::default();
+
+        let scp1o = serde_json::from_slice(from_raw_parts(
+            seal_commit_phase1_output_ptr,
+            seal_commit_phase1_output_len,
+        ))
+        .map_err(Into::into);
+
+        if env::var("DISABLE_WEBAPI").is_err() {
+            let web_data = seal_data::SealCommitPhase2Data {
+                phase1_output: scp1o.unwrap(),
+                prover_id: prover_id.inner,
+                sector_id: SectorId::from(sector_id),
+            };
+            let json_data = json!(web_data);
+            let r = webapi_post_polling!("seal/seal_commit_phase2", &json_data);
+            info!("response: {:?}", r);
+
+            if let Err(e) = r {
+                response.status_code = FCPResponseStatus::FCPUnclassifiedError;
+                response.error_msg = rust_str_to_c_str(format!("{:?}", e));
+                return raw_ptr(response);
+            }
+
+            let r = r.unwrap();
+            let output: SealCommitPhase2Output =
+                serde_json::from_value(r.get("Ok").unwrap().clone()).unwrap();
+            response.status_code = FCPResponseStatus::FCPNoError;
+            response.proof_ptr = output.proof.as_ptr();
+            response.proof_len = output.proof.len();
+            mem::forget(output.proof);
+        } else {
+            let result = scp1o.and_then(|o| {
+                filecoin_proofs_api::seal::seal_commit_phase2(
+                    o,
+                    prover_id.inner,
+                    SectorId::from(sector_id),
+                )
+            });
+
+            match result {
+                Ok(output) => {
+                    response.status_code = FCPResponseStatus::FCPNoError;
+                    response.proof_ptr = output.proof.as_ptr();
+                    response.proof_len = output.proof.len();
+                    mem::forget(output.proof);
+                }
+                Err(err) => {
+                    response.status_code = FCPResponseStatus::FCPUnclassifiedError;
+                    response.error_msg = rust_str_to_c_str(format!("{:?}", err));
+                }
+            }
+        }
+
+        info!("seal_commit_phase2: finish");
+
+        raw_ptr(response)
+    })
 }
