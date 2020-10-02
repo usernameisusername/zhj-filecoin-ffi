@@ -33,7 +33,7 @@ static REQWEST_CLIENT: Lazy<Client> = Lazy::new(|| {
 });
 
 static CONFIG: Lazy<WebApiConfig> = Lazy::new(|| {
-    let f = fs::File::open("/etc/filecoin-webapi.yaml").expect("open config file failed");
+    let f = fs::File::open("/etc/filecoin-ffi.yaml").expect("open config file failed");
     let config = serde_yaml::from_reader(f).unwrap();
 
     info!("filecoin-webapi config: {:?}", config);
