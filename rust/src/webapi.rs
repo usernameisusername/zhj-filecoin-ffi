@@ -19,17 +19,18 @@ use std::time::Duration;
 use std::{env, mem, thread};
 
 static REQWEST_CLIENT: Lazy<Client> = Lazy::new(|| {
-    let mut buf = vec![];
-    fs::File::open(&CONFIG.trust_cert)
-        .expect("open cert file failed!")
-        .read_to_end(&mut buf)
-        .expect("read cert file failed");
-    let cert = Certificate::from_pem(&buf).expect("read PEM cert failed");
+    let mut builder = ClientBuilder::new();
+    for config in CONFIG.servers.iter() {
+        let mut buf = vec![];
+        fs::File::open(&config.cert)
+            .expect("open cert file failed!")
+            .read_to_end(&mut buf)
+            .expect("read cert file failed");
+        let cert = Certificate::from_pem(&buf).expect("read PEM cert failed");
+        builder = builder.add_root_certificate(cert);
+    }
 
-    ClientBuilder::new()
-        .add_root_certificate(cert)
-        .build()
-        .expect("Build Reqwest client failed!")
+    builder.build().expect("Build Reqwest client failed!")
 });
 
 static CONFIG: Lazy<WebApiConfig> = Lazy::new(|| {
@@ -40,17 +41,24 @@ static CONFIG: Lazy<WebApiConfig> = Lazy::new(|| {
     config
 });
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+struct ServerConfig {
+    url: String,
+    cert: String,
+    token: String,
+}
+
 #[derive(Deserialize, Serialize, Debug)]
 struct WebApiConfig {
-    trust_cert: String,
-    servers: Vec<String>,
+    servers: Vec<ServerConfig>,
 }
 
 impl WebApiConfig {
-    fn pick_server(&self) -> &String {
+    fn pick_server(&self) -> ServerConfig {
         self.servers
             .choose(&mut rand::thread_rng())
             .expect("No server found!")
+            .clone()
     }
 }
 
@@ -91,11 +99,11 @@ enum WebApiError {
 fn webapi_post_pick<T: Serialize + ?Sized>(
     path: &str,
     json: &T,
-) -> Result<(String, Value), String> {
+) -> Result<(ServerConfig, Value), String> {
     loop {
         let server = CONFIG.pick_server();
-        let url = format!("{}{}", server, path);
-        match webapi_post(&url, json) {
+        let url = format!("{}{}", server.url, path);
+        match webapi_post(&url, &server.token, json) {
             Ok(val) => return Ok((server.clone(), val)),
             Err(WebApiError::Error(err)) => return Err(err),
             Err(WebApiError::StatusError(stat)) => {
@@ -107,16 +115,16 @@ fn webapi_post_pick<T: Serialize + ?Sized>(
         }
 
         // sleep
-        debug!("TooManyRequests in server {}, waiting...", server);
+        debug!("TooManyRequests in server {:?}, waiting...", server);
         thread::sleep(Duration::from_secs(60));
     }
 }
 
 #[allow(dead_code)]
-fn webapi_post<T: Serialize + ?Sized>(url: &str, json: &T) -> Result<Value, WebApiError> {
+fn webapi_post<T: Serialize + ?Sized>(url: &str, token: &str, json: &T) -> Result<Value, WebApiError> {
     trace!("webapi_post url: {}", url);
 
-    let post = REQWEST_CLIENT.post(url);
+    let post = REQWEST_CLIENT.post(url).header("Authorization", token);
     let text = match post.json(json).send() {
         Ok(response) => {
             let stat = response.status().as_u16();
@@ -154,7 +162,7 @@ pub(crate) fn webapi_post_polling<T: Serialize + ?Sized>(
     };
 
     info!(
-        "webapi_post_polling request server: {}, state: {:?}",
+        "webapi_post_polling request server: {:?}, state: {:?}",
         server, state
     );
 
@@ -166,8 +174,8 @@ pub(crate) fn webapi_post_polling<T: Serialize + ?Sized>(
     };
 
     loop {
-        let url = format!("{}{}", server, "sys/query_state");
-        let val = webapi_post(&url, &json!(proc_id)).map_err(|e| format!("{:?}", e))?;
+        let url = format!("{}{}", server.url, "sys/query_state");
+        let val = webapi_post(&url, &server.token, &json!(proc_id)).map_err(|e| format!("{:?}", e))?;
         let poll_state: PollingState = from_value(val).map_err(|e| format!("{:?}", e))?;
 
         match poll_state {
