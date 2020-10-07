@@ -32,7 +32,7 @@ serde = { version = "*", features = ["derive"] }
 serde_yaml = "*"
 once_cell = "*"
 reqwest = { version = "*", features = ["json", "blocking"] }
-filecoin-webapi = { git = "https://github.com/sbwtw/Filecoin-webapi", rev = "dd09645" }
+filecoin-webapi = { git = "https://github.com/sbwtw/Filecoin-webapi", rev = "ce9f5fc" }
 
 neptune = "=1.1.1"
 neptune-triton = "=1.0.0"
