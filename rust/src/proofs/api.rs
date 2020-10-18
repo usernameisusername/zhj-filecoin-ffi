@@ -16,75 +16,75 @@ use super::types::*;
 use crate::util::api::init_log;
 
 use serde_json::json;
-use tarpc::{client, context};
-use tokio::runtime::Runtime;
-use tokio_serde::formats::Json;
+// use tarpc::{client, context};
+// use tokio::runtime::Runtime;
+// use tokio_serde::formats::Json;
 use filecoin_webapi::*;
 use std::env;
 use std::net::SocketAddr;
 use std::sync::Mutex;
 
 lazy_static! {
-    static ref RUNTIME: Mutex<Runtime> = { Mutex::new(Runtime::new().unwrap()) };
-    static ref RPC_CLIENT: Mutex<SchedulerClient> = {
-        let r = async {
-            let server_addr: SocketAddr = "127.0.0.1:6000".parse().unwrap();
-            let transport = tarpc::serde_transport::tcp::connect(server_addr, Json::default())
-                .await
-                .unwrap();
-            SchedulerClient::new(client::Config::default(), transport)
-                .spawn()
-                .unwrap()
-        };
-
-        let mut rt = RUNTIME.lock().unwrap();
-        let client = rt.block_on(r);
-
-        Mutex::new(client)
-    };
+    // static ref RUNTIME: Mutex<Runtime> = { Mutex::new(Runtime::new().unwrap()) };
+    // static ref RPC_CLIENT: Mutex<SchedulerClient> = {
+    //     let r = async {
+    //         let server_addr: SocketAddr = "127.0.0.1:6000".parse().unwrap();
+    //         let transport = tarpc::serde_transport::tcp::connect(server_addr, Json::default())
+    //             .await
+    //             .unwrap();
+    //         SchedulerClient::new(client::Config::default(), transport)
+    //             .spawn()
+    //             .unwrap()
+    //     };
+    //
+    //     let mut rt = RUNTIME.lock().unwrap();
+    //     let client = rt.block_on(r);
+    //
+    //     Mutex::new(client)
+    // };
 }
 
-#[tarpc::service]
-pub trait Scheduler {
-    async fn get_cond(cond: String) -> Option<u64>;
-    async fn remove_guard(token: u64) -> Option<bool>;
-}
-
-struct TokenGuard(u64);
-
-impl TokenGuard {
-    fn new(token: u64) -> Self {
-        TokenGuard(token)
-    }
-}
-
-impl std::ops::Drop for TokenGuard {
-    fn drop(&mut self) {
-        let mut client = RPC_CLIENT.lock().unwrap();
-        let r = async { client.remove_guard(context::current(), self.0).await.unwrap() };
-        let mut rt = RUNTIME.lock().unwrap();
-        rt.block_on(r);
-    }
-}
-
-macro_rules! wait_cond {
-    ($cond:expr, $time:expr) => {{
-        let mut client = RPC_CLIENT.lock().unwrap();
-        let r = async {
-            loop {
-                let x = client.get_cond(context::current(), $cond).await;
-                if let Ok(Some(t)) = x {
-                    return t;
-                }
-
-                std::thread::sleep(std::time::Duration::from_secs($time));
-            }
-        };
-
-        let mut rt = RUNTIME.lock().unwrap();
-        TokenGuard::new(rt.block_on(r))
-    }};
-}
+// #[tarpc::service]
+// pub trait Scheduler {
+//     async fn get_cond(cond: String) -> Option<u64>;
+//     async fn remove_guard(token: u64) -> Option<bool>;
+// }
+//
+// struct TokenGuard(u64);
+//
+// impl TokenGuard {
+//     fn new(token: u64) -> Self {
+//         TokenGuard(token)
+//     }
+// }
+//
+// impl std::ops::Drop for TokenGuard {
+//     fn drop(&mut self) {
+//         let mut client = RPC_CLIENT.lock().unwrap();
+//         let r = async { client.remove_guard(context::current(), self.0).await.unwrap() };
+//         let mut rt = RUNTIME.lock().unwrap();
+//         rt.block_on(r);
+//     }
+// }
+//
+// macro_rules! wait_cond {
+//     ($cond:expr, $time:expr) => {{
+//         let mut client = RPC_CLIENT.lock().unwrap();
+//         let r = async {
+//             loop {
+//                 let x = client.get_cond(context::current(), $cond).await;
+//                 if let Ok(Some(t)) = x {
+//                     return t;
+//                 }
+//
+//                 std::thread::sleep(std::time::Duration::from_secs($time));
+//             }
+//         };
+//
+//         let mut rt = RUNTIME.lock().unwrap();
+//         TokenGuard::new(rt.block_on(r))
+//     }};
+// }
 
 /// TODO: document
 ///
@@ -467,14 +467,19 @@ pub unsafe extern "C" fn fil_seal_commit_phase2(
             }
 
             let r = r.unwrap();
-            let output: SealCommitPhase2Output = serde_json::from_value(r.get("Ok").unwrap().clone()).unwrap();
+            let output: SealCommitPhase2Output =
+                serde_json::from_value(r.get("Ok").unwrap().clone()).unwrap();
             response.status_code = FCPResponseStatus::FCPNoError;
             response.proof_ptr = output.proof.as_ptr();
             response.proof_len = output.proof.len();
             mem::forget(output.proof);
         } else {
             let result = scp1o.and_then(|o| {
-                filecoin_proofs_api::seal::seal_commit_phase2(o, prover_id.inner, SectorId::from(sector_id))
+                filecoin_proofs_api::seal::seal_commit_phase2(
+                    o,
+                    prover_id.inner,
+                    SectorId::from(sector_id),
+                )
             });
 
             match result {

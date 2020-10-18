@@ -31,9 +31,9 @@ serde_json = "1.0.46"
 serde = "^1.0"
 lazy_static = "^1.4"
 reqwest = { version = "^0.10", features = ["blocking", "json"] }
-tarpc = { version = "*", features = ["full"] }
-tokio = { version = "*", features = ["full"] }
-tokio-serde = { version = "*", features = ["json"] }
+#tarpc = { version = "*", features = ["full"] }
+#tokio = { version = "*", features = ["full"] }
+#tokio-serde = { version = "*", features = ["json"] }
 
 neptune = "=1.1.1"
 neptune-triton = "=1.0.0"
