@@ -269,7 +269,7 @@ pub unsafe extern "C" fn fil_seal_pre_commit_phase1(
 
         info!("seal_pre_commit_phase1: start");
 
-        let _guard = wait_cond!("P1".to_string(), 30);
+        //let _guard = wait_cond!("P1".to_string(), 30);
 
         let public_pieces: Vec<PieceInfo> = from_raw_parts(pieces_ptr, pieces_len)
             .iter()
@@ -324,7 +324,7 @@ pub unsafe extern "C" fn fil_seal_pre_commit_phase2(
 
         info!("seal_pre_commit_phase2: start");
 
-        let _guard = wait_cond!("P2".to_string(), 30);
+        //let _guard = wait_cond!("P2".to_string(), 30);
 
         let mut response: fil_SealPreCommitPhase2Response = Default::default();
 
@@ -382,7 +382,7 @@ pub unsafe extern "C" fn fil_seal_commit_phase1(
 
         info!("seal_commit_phase1: start");
 
-        let _guard = wait_cond!("C1".to_string(), 30);
+        //let _guard = wait_cond!("C1".to_string(), 30);
 
         let mut response = fil_SealCommitPhase1Response::default();
 
@@ -440,7 +440,7 @@ pub unsafe extern "C" fn fil_seal_commit_phase2(
 
         info!("seal_commit_phase2: start");
 
-        let _guard = wait_cond!("C2".to_string(), 30);
+        //let _guard = wait_cond!("C2".to_string(), 30);
 
         let mut response = fil_SealCommitPhase2Response::default();
 
